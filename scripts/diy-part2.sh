@@ -17,7 +17,6 @@ replace_all_or_fail() {
 }
 
 BASE_FILES=package/base-files/files/bin/config_generate
-LUCI_MAKEFILE=feeds/luci/collections/luci/Makefile
 DEVICE_TREE=target/linux/mediatek/dts/mt7981b-cudy-tr3000-v1.dtsi
 HNAT_CONFIG=target/linux/mediatek/filogic/config-6.12
 AURORA_DEFAULTS=package/luci-app-aurora-config/root/usr/share/aurora/default.template
@@ -31,7 +30,6 @@ ROUTER_HOSTNAME="Cudy-TR3000"
 ROOT_PASSWORD_HASH=""
 
 replace_all_or_fail '192.168.1.1' "$LAN_IP" "$BASE_FILES"
-replace_all_or_fail 'luci-theme-bootstrap' 'luci-theme-aurora' "$LUCI_MAKEFILE"
 replace_all_or_fail 'ImmortalWrt' "$ROUTER_HOSTNAME" "$BASE_FILES"
 
 # If provided, install only the encrypted hash in /etc/shadow; never store a
