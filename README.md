@@ -1,1 +1,0 @@
-# cudy-tr3000-256m-immortalwrt
