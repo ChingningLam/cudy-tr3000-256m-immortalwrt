@@ -1,3 +1,4 @@
+
 #
 # https://github.com/P3TERX/Actions-OpenWrt
 #
@@ -168,33 +169,26 @@ jobs:
         run: |
           cd openwrt
 
-          # Keep routine compiler output out of the Actions console, but write it to a
-          # file in the workspace so a failed run can upload the full log as an artifact.
+          # 完整构建日志写到工作区，失败时会作为 artifact 上传，便于定位真正的首个错误。
           BUILD_LOG="$GITHUB_WORKSPACE/openwrt-build.log"
           echo "🔨 Starting compilation with $(nproc) threads"
           echo "CCACHE_DIR: $CCACHE_DIR"
 
           if make -j"$(nproc)" CC="ccache gcc" CXX="ccache g++" >"$BUILD_LOG" 2>&1; then
-            echo "✅ Multi-threaded compilation succeeded"
+            echo "✅ Compilation succeeded"
+            echo "status=success" >> $GITHUB_OUTPUT
           else
-            echo "⚠️ Multi-threaded compilation failed; retrying single-threaded with verbose output."
-            # The retry output is appended after the first failure, so the original
-            # error is still available at the start of the uploaded log.
-            if ! make -j1 V=s CC="ccache gcc" CXX="ccache g++" >>"$BUILD_LOG" 2>&1; then
-              echo "❌ Compilation failed"
-              echo "status=failure" >> $GITHUB_OUTPUT
-              echo "::group::Last 400 lines of the build log"
-              tail -n 400 "$BUILD_LOG" || true
-              echo "::endgroup::"
-              echo "::group::config.log of recently failed packages"
-              find build_dir -maxdepth 4 -name config.log -mmin -240 -print0 2>/dev/null \
-                | xargs -0 -r -n1 sh -c 'echo "===== $0 ====="; tail -n 80 "$0"' || true
-              echo "::endgroup::"
-              exit 1
-            fi
-            echo "✅ Single-threaded compilation succeeded"
+            echo "❌ Compilation failed"
+            echo "status=failure" >> $GITHUB_OUTPUT
+            echo "::group::Last 400 lines of the build log"
+            tail -n 400 "$BUILD_LOG" || true
+            echo "::endgroup::"
+            echo "::group::config.log of recently failed packages"
+            find build_dir -maxdepth 4 -name config.log -mmin -240 -print0 2>/dev/null \
+              | xargs -0 -r -n1 sh -c 'echo "===== $0 ====="; tail -n 80 "$0"' || true
+            echo "::endgroup::"
+            exit 1
           fi
-          echo "status=success" >> $GITHUB_OUTPUT
 
           # 显示 ccache 统计
           echo "📊 ccache statistics:"
