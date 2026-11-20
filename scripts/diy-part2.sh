@@ -21,6 +21,7 @@ DEVICE_TREE=target/linux/mediatek/dts/mt7981b-cudy-tr3000-v1.dtsi
 HNAT_CONFIG=target/linux/mediatek/filogic/config-6.12
 AURORA_DEFAULTS=package/luci-app-aurora-config/root/usr/share/aurora/default.template
 SHADOW_FILE=package/base-files/files/etc/shadow
+RUST_MAKEFILE=feeds/packages/lang/rust/Makefile
 
 # ===== User settings: edit these to change login details =====
 LAN_IP="192.168.6.1"
@@ -52,6 +53,34 @@ if [[ -n "$ROOT_PASSWORD_HASH" ]]; then
   chmod 600 "$SHADOW_TMP"
   mv "$SHADOW_TMP" "$SHADOW_FILE"
 fi
+
+# Rust 1.96 may try to fetch a CI-built LLVM archive that is no longer
+# available. Build LLVM from the Rust source instead of relying on that URL.
+if [[ ! -f "$RUST_MAKEFILE" ]]; then
+  echo "Rust package Makefile not found: $RUST_MAKEFILE" >&2
+  exit 1
+fi
+python3 - "$RUST_MAKEFILE" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+start = text.find("HOST_CONFIGURE_ARGS =")
+if start < 0:
+    raise SystemExit(f"HOST_CONFIGURE_ARGS not found in {path}")
+end = text.find("$(TARGET_CONFIGURE_ARGS)", start)
+if end < 0:
+    raise SystemExit(f"$(TARGET_CONFIGURE_ARGS) not found in HOST_CONFIGURE_ARGS in {path}")
+block = text[start:end]
+option = "--set=llvm.download-ci-llvm=false"
+if option in block:
+    print("Rust LLVM CI download is already disabled")
+else:
+    text = text[:end] + "\t" + option + " " + chr(92) + "\n\n" + text[end:]
+    path.write_text(text)
+    print("Disabled Rust LLVM CI download; LLVM will build from source")
+PY
 
 # Seed the Aurora theme's first-boot UCI config with dropdown navigation.
 if grep -qF "option nav_type 'dropdown'" "$AURORA_DEFAULTS"; then
