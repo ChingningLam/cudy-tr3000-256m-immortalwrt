@@ -36,6 +36,12 @@ env:
   UPLOAD_RELEASE: true
   TZ: Asia/Shanghai
 
+# GITHUB_TOKEN 默认是只读的：创建 Release/标签需要 contents: write；
+# 删除旧 workflow run 需要 actions: write；删除旧 Release 也需要 contents: write。
+permissions:
+  contents: write
+  actions: write
+
 jobs:
   build:
     runs-on: ubuntu-22.04
