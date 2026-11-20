@@ -113,6 +113,21 @@ jobs:
             echo "MediaTek HNAT is not enabled in the Filogic kernel config" >&2
             exit 1
           }
+          # 工具链版本写进日志，方便排查；同时拦住旧 binutils + DT_RELR 的组合：
+          # 本树默认 CONFIG_PKG_DT_RELR=y（链接加 -z pack-relative-relocs），AArch64 的
+          # DT_RELR 需要 binutils >= 2.43。旧版本 ld 只会输出 warning，但 ruby 3.4 的
+          # configure 会把链接期任何 stderr 输出判定为 LDFLAGS 无效，导致编译中断。
+          BINUTILS_VER=$(sed -n 's/^CONFIG_BINUTILS_VERSION="\([0-9.]*\)"/\1/p' .config)
+          GCC_VER=$(sed -n 's/^CONFIG_GCC_VERSION="\(.*\)"/\1/p' .config)
+          echo "🛠️ Toolchain: binutils=${BINUTILS_VER:-<default>} gcc=${GCC_VER:-<default>}"
+          if grep -q '^CONFIG_PKG_DT_RELR=y$' .config && [[ -n "$BINUTILS_VER" ]]; then
+            BIN_MAJOR=${BINUTILS_VER%%.*}
+            BIN_MINOR=${BINUTILS_VER#*.}; BIN_MINOR=${BIN_MINOR%%.*}
+            if (( BIN_MAJOR < 2 || (BIN_MAJOR == 2 && BIN_MINOR < 43) )); then
+              echo "binutils $BINUTILS_VER does not support AArch64 DT_RELR (-z pack-relative-relocs); use the source tree default (>= 2.43)" >&2
+              exit 1
+            fi
+          fi
           CONFIG_HASH=$(md5sum .config | awk '{print $1}')
           echo "hash=$CONFIG_HASH" >> $GITHUB_OUTPUT
           echo "📋 Config hash: $CONFIG_HASH"
@@ -152,30 +167,34 @@ jobs:
         id: compile
         run: |
           cd openwrt
-          BUILD_LOG="$RUNNER_TEMP/openwrt-build.log"
+
+          # Keep routine compiler output out of the Actions console, but write it to a
+          # file in the workspace so a failed run can upload the full log as an artifact.
+          BUILD_LOG="$GITHUB_WORKSPACE/openwrt-build.log"
           echo "🔨 Starting compilation with $(nproc) threads"
           echo "CCACHE_DIR: $CCACHE_DIR"
 
-          # Keep routine compiler output out of the Actions console. On failure,
-          # show only the last part of the log so the useful error context remains visible.
-          if make -j$(nproc) CC="ccache gcc" CXX="ccache g++" >"$BUILD_LOG" 2>&1; then
+          if make -j"$(nproc)" CC="ccache gcc" CXX="ccache g++" >"$BUILD_LOG" 2>&1; then
             echo "✅ Multi-threaded compilation succeeded"
-            echo "status=success" >> $GITHUB_OUTPUT
           else
-            echo "⚠️ Multi-threaded compilation failed; retrying single-threaded. Build details are being captured."
-            if make -j1 V=s CC="ccache gcc" CXX="ccache g++" >>"$BUILD_LOG" 2>&1; then
-              echo "✅ Single-threaded compilation succeeded"
-              echo "status=success" >> $GITHUB_OUTPUT
-            else
-              BUILD_STATUS=$?
+            echo "⚠️ Multi-threaded compilation failed; retrying single-threaded with verbose output."
+            # The retry output is appended after the first failure, so the original
+            # error is still available at the start of the uploaded log.
+            if ! make -j1 V=s CC="ccache gcc" CXX="ccache g++" >>"$BUILD_LOG" 2>&1; then
               echo "❌ Compilation failed"
               echo "status=failure" >> $GITHUB_OUTPUT
-              echo "::group::Last 120 lines of the build log"
-              tail -n 120 "$BUILD_LOG"
+              echo "::group::Last 400 lines of the build log"
+              tail -n 400 "$BUILD_LOG" || true
               echo "::endgroup::"
-              exit "$BUILD_STATUS"
+              echo "::group::config.log of recently failed packages"
+              find build_dir -maxdepth 4 -name config.log -mmin -240 -print0 2>/dev/null \
+                | xargs -0 -r -n1 sh -c 'echo "===== $0 ====="; tail -n 80 "$0"' || true
+              echo "::endgroup::"
+              exit 1
             fi
+            echo "✅ Single-threaded compilation succeeded"
           fi
+          echo "status=success" >> $GITHUB_OUTPUT
 
           # 显示 ccache 统计
           echo "📊 ccache statistics:"
@@ -197,6 +216,15 @@ jobs:
           echo ""
           echo "📊 Build directory size:"
           du -sh /workdir/openwrt 2>/dev/null || echo "Unable to calculate"
+
+      - name: 📎 Upload build log
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: openwrt-build-log
+          path: openwrt-build.log
+          compression-level: 9
+          if-no-files-found: warn
 
       - name: 🪄 Upload bin directory
         uses: actions/upload-artifact@v4
