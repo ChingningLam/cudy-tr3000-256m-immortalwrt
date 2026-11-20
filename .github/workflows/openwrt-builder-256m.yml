@@ -152,23 +152,28 @@ jobs:
         id: compile
         run: |
           cd openwrt
+          BUILD_LOG="$RUNNER_TEMP/openwrt-build.log"
           echo "🔨 Starting compilation with $(nproc) threads"
           echo "CCACHE_DIR: $CCACHE_DIR"
 
-          # 首先尝试多线程编译
-          if make -j$(nproc) CC="ccache gcc" CXX="ccache g++"; then
+          # Keep routine compiler output out of the Actions console. On failure,
+          # show only the last part of the log so the useful error context remains visible.
+          if make -j$(nproc) CC="ccache gcc" CXX="ccache g++" >"$BUILD_LOG" 2>&1; then
             echo "✅ Multi-threaded compilation succeeded"
             echo "status=success" >> $GITHUB_OUTPUT
           else
-            echo "⚠️ Multi-threaded compilation failed, retrying with single thread and verbose output..."
-            make -j1 V=s
-            if [ $? -eq 0 ]; then
+            echo "⚠️ Multi-threaded compilation failed; retrying single-threaded. Build details are being captured."
+            if make -j1 V=s CC="ccache gcc" CXX="ccache g++" >>"$BUILD_LOG" 2>&1; then
               echo "✅ Single-threaded compilation succeeded"
               echo "status=success" >> $GITHUB_OUTPUT
             else
+              BUILD_STATUS=$?
               echo "❌ Compilation failed"
               echo "status=failure" >> $GITHUB_OUTPUT
-              exit 1
+              echo "::group::Last 120 lines of the build log"
+              tail -n 120 "$BUILD_LOG"
+              echo "::endgroup::"
+              exit "$BUILD_STATUS"
             fi
           fi
 
